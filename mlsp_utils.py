@@ -62,7 +62,7 @@ def tensor_to_geotiff(tensor, meta_data, filename, transform=None):
     height, width = np_arr.shape
 
     print(f"{np_arr.shape = }")
-    print(f"{np_arr[1001, 190] = }")
+    #print(f"{np_arr[1001, 190] = }")
 
     with rasterio.open(filename, 'w', **meta_data) as geotiff:
         geotiff.write(np_arr, 1)
