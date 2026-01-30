@@ -24,17 +24,17 @@ def slice_tensor(tensor, slices, dim, res):
         return res
 
 
-#/!\ err on qgis tensors where dim(0) is 1 /!\
+#/!\ on qgis tensors dim(0) is 1 - why ? -> ask T. /!\
 # fix: reshape the tensor to drop the dim(0) before splitting
 def reshape_qgis_input(tensor):
+    print(f"old shape: {tensor.size()}")
     if tensor.dim() == 3 and tensor.size(0) == 1:
         tensor = tensor.reshape(tensor.size(1), tensor.size(2))
-    print(f"old shape: {tensor.size()}")
     print(f"new shape: {tensor.size()}")
     return tensor
 
 def tensor_info(tensor):
-    print(f"{tensor = }")
+    #print(f"{tensor = }")
     print(f"{tensor.size() = }")
     print(f"{tensor.dim() = }")
 
@@ -51,5 +51,8 @@ res = []
 slice_tensor(tensor, int(slices), tensor.dim(), res)
 
 print(f"{len(res) = }")
+for r in range(len(res)):
+    tensor = res[r]
+    tensor_info(tensor)
 
 sys.exit(0)
