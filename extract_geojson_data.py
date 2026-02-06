@@ -19,7 +19,8 @@ LO_BOUND_Y = 0
 HI_BOUND_Y = 400 
 '''
 DEBUG_AMP=1
-TEMPORAL_SAMPLING = 10
+TEMPORAL_SAMPLING = 10 # samples
+TEMPORAL_FREQUENCY = 900 # seconds
 
 RESOLUTION_RATIO = 5 # ex: res*i 2 == 1 pixel -> 2 pixels
 
@@ -106,6 +107,7 @@ def sample_list(lists, frequency):
 def gen_new_poi_indexes(poi_indexes, movements, ratio):
     new_poi_list = []
     nb_new_poi = (ratio - 1) // 2
+    print(f"{nb_new_poi = }")
     for p in range(len(poi_indexes)):
         poi = poi_indexes[p]
         movmt = None
@@ -114,10 +116,10 @@ def gen_new_poi_indexes(poi_indexes, movements, ratio):
             movmt = movements[0] # S->N movement
         else:
             movmt = movements[1] # N->S movement
-        print(f"{movmt = }")
+        #print(f"{movmt = }")
         i = poi[0]
         j = poi[1]
-        print(f"poi({i},{j})")
+        #print(f"poi({i},{j})")
         poi_neighbors = []
         for k in range(1, nb_new_poi + 1):
             if movmt[1] != 0:
@@ -148,6 +150,7 @@ def gen_new_poi_indexes(poi_indexes, movements, ratio):
 def gen_new_poi_indexes_2(poi_indexes, movements, ratio):
     new_poi_list = []
     nb_new_poi = (ratio - 1) // 2
+    print(f"{nb_new_poi = }")
     for p in range(len(poi_indexes)):
         poi = poi_indexes[p]
         movmt = None
@@ -156,10 +159,10 @@ def gen_new_poi_indexes_2(poi_indexes, movements, ratio):
             movmt = movements[0] # S->N movement
         else:
             movmt = movements[1] # N->S movement
-        print(f"{movmt = }")
+        #print(f"{movmt = }")
         i = poi[0] * ratio
         j = poi[1] * ratio
-        print(f"poi({i},{j})")
+        #print(f"poi({i},{j})")
         poi_neighbors = []
         for k in range(1, nb_new_poi + 1):
             if movmt[1] != 0:
@@ -243,6 +246,34 @@ def gen_new_source_terms_2(trgt_tensor_shape,
     # 4b. writetensor to new filename
     tensor_to_geotiff(ns_tensor_n, trgt_metadata, filename, trgt_transform)
 
+def gen_new_source_terms_3(trgt_tensor_shape,
+                           timestep,
+                           new_poi_idx,
+                           aggregated_timeseries,
+                           aggregated_time_vectors,
+                           trgt_metadata,
+                           trgt_transform):
+    ns_tensor_n = torch.zeros(trgt_tensor_shape)
+    # 3b. load data in tensor @ new_poi_idfor poi in range(len(new_poi_idx)):
+    for ps in range(len(new_poi_idx)):
+        poi_set = new_poi_idx[ps]
+        data = aggregated_timeseries[ps]
+        split_data = data[timestep] / RESOLUTION_RATIO * DEBUG_AMP
+        #print(f"{split_data = }")
+        for poi_i, poi_j in poi_set:
+            ns_tensor_n[0, poi_i, poi_j] = split_data
+
+    #print(f"{ns_tensor_n = }")
+
+    # 4. generate geotiffs (1 per time compr)
+    # 4a. filename
+    time = round(aggregated_time_vectors[0][timestep])
+    #print(f"{time = }")
+    filename = str(time) + ".tif"
+    print(f"{filename = }")
+    # 4b. writetensor to new filename
+    tensor_to_geotiff(ns_tensor_n, trgt_metadata, filename, trgt_transform)
+
 if len(sys.argv) != 4:
     print('missing parameter: <geojson_file> <geotiff_file> <geotiff_file>')
     sys.exit(1)
@@ -252,14 +283,14 @@ if len(sys.argv) != 4:
 timeseries = extract_key_from_geojson(geojson_file, 'timeserie')
 for ts in range(len(timeseries)):
     timeserie = timeseries[ts]
-    print(f"{type(timeserie) = } {type(timeserie) =}")
-    print(f"{len(timeserie) = }")
+    #print(f"{type(timeserie) = } {type(timeserie) =}")
+    #print(f"{len(timeserie) = }")
 
 time_vectors = extract_key_from_geojson(geojson_file, 'time_vector')
 for ts in range(len(time_vectors)):
     time_vector = time_vectors[ts]
-    print(f"{type(time_vector) = }")
-    print(f"{len(time_vector) = }")
+    #print(f"{type(time_vector) = }")
+    #print(f"{len(time_vector) = }")
 
 reference_tensor = geotiff_to_tensor(geotiff_file)
 
@@ -310,33 +341,107 @@ if len(points_coordinates) < 1:
 else:
     points_coordinates = points_coordinates[0]
 
-print(f"{points_coordinates = }")
+#print(f"{points_coordinates = }")
 
 for pc in range(len(points_coordinates)):
     point_coordinates = points_coordinates[pc]
-    print(f"{type(point_coordinates) = }")
-    print(f"{len(point_coordinates) = }")
-    print(f"{point_coordinates = }")
+    #print(f"{type(point_coordinates) = }")
+    #print(f"{len(point_coordinates) = }")
+    #print(f"{point_coordinates = }")
 
 # 0.convert poi spatial coords
 poi_indexes = convert_poi_spatial_coords_to_indexes(spatial_coords, points_coordinates)
-print(f"{points_coordinates = }")
-print(f"{poi_indexes = }")
+#print(f"{points_coordinates = }")
+#print(f"{poi_indexes = }")
 
 # 1. temporal compression
 # 1a. for each point, aggregate timeseries data
 aggregated_timeseries = aggregate_list(timeseries, TEMPORAL_SAMPLING)
 # 1b. sample time_vector @ same freq. as point aggreg.
 aggregated_time_vectors = sample_list(time_vectors, TEMPORAL_SAMPLING)
+
+def temp_freq_id(lists, frequency):
+    sample_lists = []
+    nb_lists = len(lists)
+    for l in range(nb_lists):
+        list_data = lists[l]
+        sample_list = []
+        index = 0
+        clock = frequency
+        for data in range(len(list_data)):
+            index += 1
+            if list_data[data] >= clock:
+                sample_list.append(index)
+                clock += frequency
+        sample_list.append(index-1) # get last idx for last rain
+        sample_lists.append(sample_list)
+    return sample_lists
+
+time_vectors_idx = temp_freq_id(time_vectors, TEMPORAL_FREQUENCY)
+
+print(f"{time_vectors_idx = }")
+print(f"{len(time_vectors_idx[0]) = }")
+
+def aggreg_data_by_time_idx(lists, idx_list):
+    aggregated_lists = []
+    nb_lists = len(lists)
+    for l in range(nb_lists):
+        list_data = lists[l]
+        aggregated_list = []
+        aggreg_val = 0
+        idx_counter = 0
+        curr_idx = idx_list[idx_counter]
+        for data in range(len(list_data)):
+            aggreg_val += list_data[data]
+            if curr_idx == data:
+                aggregated_list.append(aggreg_val)
+                aggreg_val = 0
+                idx_counter += 1
+                if idx_counter < len(idx_list):
+                    curr_idx = idx_list[idx_counter]
+        #aggregated_list.append(aggreg_val)
+        aggregated_lists.append(aggregated_list)
+    return aggregated_lists
+
+time_aggreg_data = aggreg_data_by_time_idx(timeseries, time_vectors_idx[0])
+#print(f"{time_aggreg_data = }")
+
 # 2. for each time data, dispatch to target (higher) resolution
 # 2a. find poi neighbors in higher res
 # we are missing the water movement direction - TODO: extend compute
 #new_poi_idx = gen_new_poi_indexes(poi_indexes, movement, RESOLUTION_RATIO)
 new_poi_idx = gen_new_poi_indexes_2(poi_indexes, movement, RESOLUTION_RATIO)
-#print(f"{new_poi_idx = }")
+
+print(f"{len(new_poi_idx) = }")
+print(f"{len(new_poi_idx[0]) = }")
+print(f"{len(new_poi_idx[1]) = }")
+print(f"{len(new_poi_idx[398]) = }")
+print(f"{len(new_poi_idx[399]) = }")
+
+sys.exit(0)
 # 3. create new source term for target resolution
 # 3a. create empty tensor of dim src term
 
+
+sel_time_vectors = []
+for tvidx in time_vectors_idx[0]:
+    time = time_vectors[0][tvidx]
+    sel_time_vectors.append(time)
+
+print(f"{sel_time_vectors = }")
+
+for t in range(len(time_vectors_idx[0])):
+    timeserie = time_aggreg_data[t]
+    gen_new_source_terms_3(trgt_tensor_shape,
+                         t,
+                         new_poi_idx,
+                         timeserie,
+                         sel_time_vectors,
+                         trgt_metadata,
+                         trgt_transform)
+
+
+'''
 for t in range(len(aggregated_time_vectors[0])):
                #gen_new_source_terms(ref_tensor_shape,
                #                     t,
@@ -352,4 +457,4 @@ for t in range(len(aggregated_time_vectors[0])):
                                     aggregated_time_vectors,
                                     trgt_metadata,
                                     trgt_transform)
-
+'''
