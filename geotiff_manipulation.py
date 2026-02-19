@@ -64,4 +64,3 @@ def get_coordinates_2154(geotiff):
         coords = np.stack((xs, ys), axis=-1)
 
         return coords
-

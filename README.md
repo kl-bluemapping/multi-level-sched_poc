@@ -14,6 +14,13 @@ split a geotiff in 2 part north/south in the middle through their extent
 
 ## source terms
 generate source terms from a sim .poi geojson output, one of the sim. inputs (e.g. a DEM) & one of the target sim. input
+
+```sh
+LORES_GEOJSON=sim/output/poi/output.geojson
+LORES_TIFF=low_res_sim/input/topography/0.tif
+HIRES_TIFF=high_res_sim/input/topography/0.tif
+```
+
 ```python
-python3 extract_geojson_data.py example_output.geojson example_lo_res_dem.tif example_hi_res_dem.tif
-``
+ python3 -O main.py $LORES_GEOJSON $LORES_TIFF $HIRES_TIFF
+```

@@ -24,9 +24,13 @@ from coordinates_conversion import (
         coordinates_list_to_indexes,
         )
 
-SOURCE_TERMS_TIMING = 3500 # in seconds
+SOURCE_TERMS_TIMING = 300 # in seconds
 
-DEBUG_AMP = 1
+DEBUG_AMP = 1e0
+
+INIT_TOTAL_METRIC_ACC = 0
+TEST_TOTAL_METRIC_ACC = 0
+TEST_SRC_TERMS_METRIC_ACC = 0
 
 def get_intervals_indexes(times_list, interval):
     '''
@@ -43,6 +47,12 @@ def get_intervals_indexes(times_list, interval):
             clock += interval
     return result_list
 
+def get_total_accumulated_data(data_lists):
+    result = 0
+    for lst in data_lists:
+        for d, data in enumerate(lst):
+            result += data
+    return result
 
 def aggregate_data_by_interval(data_lists, indexes_list):
     '''
@@ -70,6 +80,7 @@ def aggregate_data_by_interval(data_lists, indexes_list):
         result_lists.append(aggregated_list)
     return result_lists
 
+
 def get_intervals_start_time(times, times_indexes):
     '''
     get the start time for ea. interval
@@ -81,18 +92,29 @@ def get_intervals_start_time(times, times_indexes):
     result_list.insert(0, times[0]);
     return result_list
 
+#print(f"TEST_INTERV_AVG_METRIC_ACC = {get_total_accumulated_data(averaged_list)}")
 
 def get_interval_average(data_lists, interval_length):
     '''
     average ea. datapoint by interval_length
     '''
     result_lists = []
+    if __debug__:
+        TOTAL_DATA = 0
+        TOTAL_AVG = 0
     for lst in data_lists:
         averaged_list = []
         for data in lst:
             averaged_data = data / interval_length
             averaged_list.append(averaged_data)
+            if __debug__:
+                print(f" {averaged_data = } = {data = } / {interval_length = }")
         result_lists.append(averaged_list)
+        if __debug__:
+            TOTAL_DATA = TOTAL_DATA + sum(lst)
+            TOTAL_AVG = TOTAL_AVG + sum(averaged_list)
+    if __debug__:
+        print(f"{TOTAL_DATA = } {TOTAL_AVG = }")
     return result_lists
 
 
@@ -263,13 +285,14 @@ if __debug__:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print('missing parameter: <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
+    if len(sys.argv) != 5:
+        print('missing parameter: <horiz|vert> <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
         sys.exit(1)
 
-    (_, geojson, lo_geotiff, hi_geotiff) = sys.argv
+    (_, split, geojson, lo_geotiff, hi_geotiff) = sys.argv
 
     if __debug__:
+        print(f"{split = }")
         print(f"{geojson = }")
         print(f"{lo_geotiff = }")
         print(f"{hi_geotiff = }")
@@ -278,6 +301,10 @@ if __name__ == "__main__":
 
     # get poi data from geojson
     timeseries = extract_values(geojson, 'timeserie')
+
+    if __debug__:
+        INIT_TOTAL_METRIC_ACC = get_total_accumulated_data(timeseries)
+        print(f"{INIT_TOTAL_METRIC_ACC = }")
 
     # get poi sampling time from geosjon
     timevector = extract_values(geojson, 'time_vector')
@@ -349,20 +376,28 @@ if __name__ == "__main__":
     aggregated_data = aggregate_data_by_interval(timeseries, selected_intervals_indexes)
 
     if __debug__:
+        TEST_TOTAL_METRIC_ACC = get_total_accumulated_data(aggregated_data)
+        print(f"{TEST_TOTAL_METRIC_ACC = }")
+
+    if __debug__:
         print(f"datapoint {0} is of length {len(aggregated_data[0])}")
         for d, data in enumerate(aggregated_data):
             if len(data) < len(selected_intervals_indexes):
                 print(f"Error: datapoint {d} is of {len(data)=} but should be at least {len(selected_intervals_indexes)}")
 
     # 1b. average interval data by interval length 
-    lo_source_terms = get_interval_average(aggregated_data, SOURCE_TERMS_TIMING)
+    #lo_source_terms = get_interval_average(aggregated_data, SOURCE_TERMS_TIMING)
+    lo_source_terms = get_interval_average(aggregated_data, 1)
 
+    if __debug__:
+        TEST_SRC_TERMS_METRIC_ACC = get_total_accumulated_data(lo_source_terms)
+        print(f"{TEST_SRC_TERMS_METRIC_ACC = }")
 
     # 2. create higher resolution points for the source term to target
 
     # 2a. divide poi by spatial section
-    # N/S partition
-    north_poi, south_poi = indexes_cardinal_split(poi_indexes, 'vertical')
+    # A/B partition
+    A_poi, B_poi = indexes_cardinal_split(poi_indexes, 'vertical')
 
     # 2b. compute scaling ratio between hih and low res/
     # get high-res geotiff metadata
@@ -370,38 +405,63 @@ if __name__ == "__main__":
     # get high-res geotiff shape
     hi_shape = get_metadata_shape(hi_metadata)
 
-    # check ratios
-    height_ratio = hi_shape[0] // lo_shape[0]
-    width_ratio = hi_shape[1] // lo_shape[1]
+    # check ratios w/ round to neareset instead of div. rest
+    height_ratio = round(hi_shape[0] / lo_shape[0])
+    width_ratio = round(hi_shape[1] / lo_shape[1])
     # input test
     if height_ratio != width_ratio:
+        print(f"{hi_shape = }")
+        print(f"{lo_shape = }")
+        print(f"{height_ratio = }")
+        print(f"{width_ratio = }")
         raise ValueError("incompatible raster shapes")
     else:
         ratio = height_ratio
 
     # 2c. for ea. partition, create new hi-res indexes
-    # north
-    north_south_mv = [1, 0] # north part to south part movement
-    new_south_indexes = sursample_indexes(north_poi, north_south_mv, ratio)
-    # cleanup (optional)
-    new_south_indexes = remove_duplicated_indexes(new_south_indexes)
-    new_south_indexes = remove_out_of_bound_indexes(new_south_indexes,
-                                                    hi_shape[0],
-                                                    hi_shape[1])
-    # south
-    south_north_mv = [-1, 0] # south part to north part movement
-    new_north_indexes = sursample_indexes(south_poi, south_north_mv, ratio)
-    # cleanup (optional)
-    new_north_indexes = remove_duplicated_indexes(new_north_indexes)
-    new_north_indexes = remove_out_of_bound_indexes(new_north_indexes,
-                                                    hi_shape[0],
-                                                    hi_shape[1])
+    if split == "horiz":
+        # north
+        A_B_mv = [1, 0] # north part to south part movement
+        new_B_indexes = sursample_indexes(A_poi, A_B_mv, ratio)
+        # cleanup (optional)
+        new_B_indexes = remove_duplicated_indexes(new_B_indexes)
+        new_B_indexes = remove_out_of_bound_indexes(new_B_indexes,
+                                                        hi_shape[0],
+                                                        hi_shape[1])
+        # south
+        B_A_mv = [-1, 0] # north part to south part movement
+        new_A_indexes = sursample_indexes(B_poi, B_A_mv, ratio)
+        # cleanup (optional)
+        new_A_indexes = remove_duplicated_indexes(new_A_indexes)
+        new_A_indexes = remove_out_of_bound_indexes(new_A_indexes,
+                                                        hi_shape[0],
+                                                        hi_shape[1])
+    elif split == "vert":
+        # west
+        A_B_mv = [0, 1] # west part to east part movement
+        new_B_indexes = sursample_indexes(A_poi, A_B_mv, ratio)
+        # cleanup (optional)
+        new_B_indexes = remove_duplicated_indexes(new_B_indexes)
+        new_B_indexes = remove_out_of_bound_indexes(new_B_indexes,
+                                                        hi_shape[0],
+                                                        hi_shape[1])
+        # est
+        B_A_mv = [0, -1] # east part to west part movement
+        new_A_indexes = sursample_indexes(B_poi, B_A_mv, ratio)
+        # cleanup (optional)
+        new_A_indexes = remove_duplicated_indexes(new_A_indexes)
+        new_A_indexes = remove_out_of_bound_indexes(new_A_indexes,
+                                                        hi_shape[0],
+                                                        hi_shape[1])
+    else:
+        print(f"ERROR: unsupported split operation: {split}")
+
     # test if new indexes map to valid coordinates
     if __debug__:
         # get spatial coordinates baseline from high-res geotiff
         hi_coords_2154 = get_coordinates_2154(hi_geotiff)
-        is_indexes_list_valid(hi_coords_2154, new_south_indexes)
-        is_indexes_list_valid(hi_coords_2154, new_north_indexes)
+        is_indexes_list_valid(hi_coords_2154, new_B_indexes)
+        is_indexes_list_valid(hi_coords_2154, new_A_indexes)
 
 
     # 3. create & assign source terms to high-res indexes
@@ -413,8 +473,8 @@ if __name__ == "__main__":
     hi_source_terms_list = generate_source_terms_list(len(source_terms_start_times),
                                                       lo_source_terms,
                                                       hi_shape,
-                                                      new_north_indexes,
-                                                      new_south_indexes,
+                                                      new_A_indexes,
+                                                      new_B_indexes,
                                                       )
 
     # 4. write geotiff files
