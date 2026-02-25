@@ -1,24 +1,75 @@
 import sys
 import os
 from osgeo import gdal
+
 from geotiff_manipulation import (
     get_geotiff_metadata,
     get_metadata_shape,
     get_metadata_transform,
     )
 
-if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print('missing parameter: <horiz|vert> <ratio> <geotiff_file>')
-        sys.exit(1)
+def compute_part_corners(min_A, min_B, max_A, max_B):
+    results = []
 
-    (_, orientation, ratio, geotiff) = sys.argv
+    split =  min_A + round((max_A - min_A) * float(ratio))
 
-    if __debug__:
-        print(f"{orientation = }")
-        print(f"{ratio = }")
-        print(f"{geotiff = }")
+    part_A_min_A = min_A
+    part_A_max_A = split
+    part_A_min_B = min_B
+    part_A_max_B = max_B
 
+    part_B_min_A = split
+    part_B_max_A = max_A
+    part_B_min_B = min_B
+    part_B_max_B = max_B
+
+    results.append(part_A_min_A)
+    results.append(part_A_max_A)
+    results.append(part_A_min_B)
+    results.append(part_A_max_B)
+    results.append(part_B_min_A)
+    results.append(part_B_max_A)
+    results.append(part_B_min_B)
+    results.append(part_B_max_B)
+
+    return results
+
+def compute_orientation_part_corners(orientation, min_A, min_B, max_A, max_B):
+    results = []
+
+    if orientation == "vert": # split over X
+        results = compute_part_corners(min_A, min_B, max_A, max_Y)
+    elif orientation == "horiz": # split over Y
+        results = compute_part_corners(min_B, min_A, max_B, max_A)
+    else:
+        print(f"ERROR: unsupported split orientation {orientation}")
+
+    return results
+
+def gen_part_path(prefix, geotiff):
+    prefix_path = os.path.join(
+            prefix,
+            os.path.basename(os.path.dirname(geotiff)))
+
+    if not os.path.exists(prefix_path):
+        os.makedirs(prefix_path)
+    path = os.path.join(prefix_path, os.path.basename(geotiff))
+
+    return path
+
+def gdal_split_geotiff(res_path, original_geotiff, min_X, min_Y, max_X, max_Y):
+    #gdal transform
+    gdal.UseExceptions() # cf. doc gdal
+
+    gdal.Translate(
+            res_path,
+            original_geotiff,
+            projWin=(min_X, min_Y, max_X, max_Y),
+            format='GTiff'
+            )
+    return
+
+def split_geotiff_ratio(orientation, ratio, geotiff):
     # get geotiff metadata
     metadata = get_geotiff_metadata(geotiff)
     # get geotiff shape
@@ -42,34 +93,23 @@ if __name__ == "__main__":
         print(f"{extent_Y_min = }")
         print(f"{extent_Y_max = }")
 
-    # compute split geotif new extents
-    if orientation == "vert": # split over X
-        split =  extent_X_min + round((extent_X_max - extent_X_min) * float(ratio))
+    corners = compute_orientation_part_corners(
+            orientation,
+            extent_X_min,
+            extent_X_max,
+            extent_Y_min,
+            extent_Y_max
+            )
 
-        part_A_min_X = extent_X_min
-        part_A_max_X = split
-        part_A_min_Y = extent_Y_min
-        part_A_max_Y = extent_Y_max
-
-        part_B_max_X = split
-        part_B_min_X = extent_X_max
-        part_B_min_Y = extent_Y_min
-        part_B_max_Y = extent_Y_max
-    elif orientation == "horiz": # split over Y
-        split =  extent_Y_min + round((extent_Y_max - extent_Y_min) * float(ratio))
-
-        part_A_min_X = extent_X_min
-        part_A_max_X = extent_X_max
-        part_A_min_Y = extent_Y_min
-        part_A_max_Y = split
-
-        part_B_min_X = extent_X_min
-        part_B_max_X = extent_X_max
-        part_B_min_Y = split
-        part_B_max_Y = extent_Y_max
-    else:
-        print(f"ERROR: unsupported split orientation {orientation}")
-        sys.exit(-1)
+    part_A_min_X = corners[0]
+    part_A_max_X = corners[1]
+    part_A_min_Y = corners[2]
+    part_A_max_Y = corners[3]
+    
+    part_B_min_X = corners[4]
+    part_B_max_X = corners[5]
+    part_B_min_Y = corners[6]
+    part_B_max_Y = corners[7]
 
     if __debug__:
         print(f"{split = }")
@@ -84,53 +124,49 @@ if __name__ == "__main__":
         print(f"{part_B_min_Y = }")
         print(f"{part_B_max_Y = }")
 
-    # dest dirs
-    part_A_dir = "part_A"
-    part_A_path = os.path.join(
-            part_A_dir,
-            os.path.basename(os.path.dirname(geotiff)))
 
-    if not os.path.exists(part_A_path):
-        os.makedirs(part_A_path)
-    part_A = os.path.join(part_A_path, os.path.basename(geotiff))
-
+    part_A = gen_part_path("part_A")
     if __debug__:
         print(f"{part_A =}")
 
-    part_B_dir = "part_B"
-    part_B_path = os.path.join(
-            part_B_dir,
-            os.path.basename(os.path.dirname(geotiff)))
-
-    if not os.path.exists(part_B_path):
-        os.makedirs(part_B_path)
-    part_B = os.path.join(part_B_path,os.path.basename(geotiff))
-
+    part_B = gen_part_path("part_B")
     if __debug__:
         print(f"{part_B =}")
 
-    #gdal transform
-    gdal.UseExceptions() # cf. doc gdal
     # part_A
-    gdal.Translate(
+    gdal_split_geotiff(
             part_A,
             geotiff,
-            projWin=(part_A_min_X,
-                     part_A_min_Y,
-                     part_A_max_X,
-                     part_A_max_Y),
-            format='GTiff'
+            part_A_min_X,
+            part_A_min_Y,
+            part_A_max_X,
+            part_A_max_Y
             )
+
     # part_B
-    gdal.Translate(
+    gdal_split_geotiff(
             part_B,
             geotiff,
-            projWin=(part_B_min_X,
-                     part_B_min_Y,
-                     part_B_max_X,
-                     part_B_max_Y),
-            format='GTiff'
+            part_B_min_X,
+            part_B_min_Y,
+            part_B_max_X,
+            part_B_max_Y
             )
+    return
+
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print('missing parameter: <horiz|vert> <ratio> <geotiff_file>')
+        sys.exit(1)
+
+    (_, orientation, ratio, geotiff) = sys.argv
+
+    if __debug__:
+        print(f"{orientation = }")
+        print(f"{ratio = }")
+        print(f"{geotiff = }")
+
+    split_geotiff_ratio(orientation, ratio, geotiff)
 
     sys.exit(0)
 

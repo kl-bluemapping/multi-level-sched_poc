@@ -7,9 +7,9 @@ downscale a geotiff to a lower res. version (fixed 1/5 atm) w/ the same spatial 
 ```
 
 ## split input
-split a geotiff in 2 part north/south in the middle through their extent
-```sh
-./split_geotiff_N_W.sh sim/input/catchment/0.tif
+split a geotiff horizontaly in the middle
+```python
+python3 split_geotiff.py horiz 0.5 file.geotiff
 ```
 
 ## source terms
@@ -24,3 +24,4 @@ HIRES_TIFF=high_res_sim/input/topography/0.tif
 ```python
  python3 -O main.py $LORES_GEOJSON $LORES_TIFF $HIRES_TIFF
 ```
+

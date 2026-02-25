@@ -27,6 +27,10 @@ def is_coordinate_valid(coordinates, x, y, tolerance=1e-6):
     return result
 
 def is_indexes_list_valid(coordinates, indexes_list):
+    """
+    for ea. index in list, check if index is valid when converted to coordinates
+    referential
+    """
     for indexes in indexes_list:
        for index in indexes:
            i = index[0]
@@ -35,11 +39,7 @@ def is_indexes_list_valid(coordinates, indexes_list):
            coords_vld = is_coordinate_valid(coordinates, x, y)
            if not coords_vld:
                print(f"Error: index({i},{j}) mapped to coords({x},{y}) invalid")
-           #else:
-           #    print(f"valid ? {coords_vld}")
     return
-
-
 
 def coordinates_list_to_indexes(coordinates, coordinates_list):
     """
@@ -52,4 +52,3 @@ def coordinates_list_to_indexes(coordinates, coordinates_list):
         index = coordinates_to_index(coordinates, x, y)
         result_list.append(index)
     return result_list
-

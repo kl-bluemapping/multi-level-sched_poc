@@ -92,8 +92,6 @@ def get_intervals_start_time(times, times_indexes):
     result_list.insert(0, times[0]);
     return result_list
 
-#print(f"TEST_INTERV_AVG_METRIC_ACC = {get_total_accumulated_data(averaged_list)}")
-
 def get_interval_average(data_lists, interval_length):
     '''
     average ea. datapoint by interval_length
@@ -221,12 +219,10 @@ def generate_source_terms_list(nb_intervals, source_terms, target_shape,
         for n, indexes in enumerate(partition_A):
             for index in indexes:
                 source_terms_array[index[0]][index[1]] = source_terms[n][t] / len(indexes) * DEBUG_AMP
-                #print(f"arr[{t}][{index[0]}][{index[1]}] = {source_terms[n][t]/len(indexes)}")
         n += 1
         for s, indexes in enumerate(partition_B):
             for index in indexes:
                 source_terms_array[index[0]][index[1]] = source_terms[n+s][t] / len(indexes) * DEBUG_AMP
-                #print(f"arr[{t}][{index[0]}][{index[1]}] = {source_terms[n+s][t]/len(indexes)}")
 
         source_terms_list.append(source_terms_array)
     return source_terms_list
@@ -241,62 +237,7 @@ def write_source_terms(source_terms_list, metadata, source_terms_start_times):
         array_to_geotiff(source_terms_list[t], metadata, geotiff_name)
     return
 
-
-'''
-if __debug__:
-    il = [
-            [0, 0],
-            [3, 3],
-            [10, 10],
-            ]
-
-    print(sursample_indexes(il, [1, 0], 2))
-
-    sys.exit(0)
-    print(remove_out_of_bound_indexes([
-        [
-            [10, 0], [15, 21], [2, 7]
-            ],
-        [
-            [10, 12], [13, -1], [12, 17]
-            ],
-                                     ],
-                                      14, 17
-                                    )
-          )
-
-    tl = [
-            [0, 0, 1, 1, 1, 1], # 4
-            [0, 1, 1, 1, 1, 2], # 6
-            [1, 1, 1, 1, 2, 2], # 8
-            ]
-    tv = [2, 4]
-    ta = aggregate_data_by_interval(tl, tv)
-    print(f"{ta = }")
-
-    times = [0, 10, 20, 30, 40, 50]
-    print(get_intervals_start_time(times, tv))
-
-    freq = 16
-    print(get_interval_average(ta, freq))
-
-    sys.exit(0)
-'''
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print('missing parameter: <horiz|vert> <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
-        sys.exit(1)
-
-    (_, split, geojson, lo_geotiff, hi_geotiff) = sys.argv
-
-    if __debug__:
-        print(f"{split = }")
-        print(f"{geojson = }")
-        print(f"{lo_geotiff = }")
-        print(f"{hi_geotiff = }")
-
+def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
     # 0. init.
 
     # get poi data from geojson
@@ -479,5 +420,22 @@ if __name__ == "__main__":
 
     # 4. write geotiff files
     write_source_terms(hi_source_terms_list, hi_metadata, source_terms_start_times)
+
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print('missing parameter: <horiz|vert> <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
+        sys.exit(1)
+
+    (_, split, geojson, lo_geotiff, hi_geotiff) = sys.argv
+
+    if __debug__:
+        print(f"{split = }")
+        print(f"{geojson = }")
+        print(f"{lo_geotiff = }")
+        print(f"{hi_geotiff = }")
+
+    generate_source_terms(_, split, geojson, lo_geotiff, hi_geotiff)
 
     sys.exit(0)
