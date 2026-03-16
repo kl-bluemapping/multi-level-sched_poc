@@ -64,3 +64,11 @@ def get_coordinates_2154(geotiff):
         coords = np.stack((xs, ys), axis=-1)
 
         return coords
+
+
+''' gdal equivalent:
+from osgeo import gdal
+
+data = gdal.Open(orig_topo_geotiff, gdal.GA_ReadOnly)
+geoTransform = data.GetGeoTransform()
+'''
