@@ -229,16 +229,16 @@ def generate_source_terms_list(nb_intervals, source_terms, target_shape,
     return source_terms_list
 
 
-def write_source_terms(source_terms_list, metadata, source_terms_start_times):
+def write_source_terms(source_terms_list, metadata, source_terms_start_times, dest):
     for t, time in enumerate(source_terms_start_times):
         rounded_time = round(time)
-        geotiff_name = str(rounded_time) + ".tif"
+        geotiff_name = dest + str(rounded_time) + ".tif"
 
         print(f"writing {geotiff_name}")
         array_to_geotiff(source_terms_list[t], metadata, geotiff_name)
     return
 
-def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
+def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff, dest):
     # 0. init.
 
     # get poi data from geojson
@@ -400,6 +400,7 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
 
     # test if new indexes map to valid coordinates
     if __debug__:
+        print("test srs")
         # get spatial coordinates baseline from high-res geotiff
         hi_coords_2154 = get_coordinates_2154(hi_geotiff)
         is_indexes_list_valid(hi_coords_2154, new_B_indexes)
@@ -408,8 +409,14 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
 
     # 3. create & assign source terms to high-res indexes
 
+    if __debug__:
+        print("compute source terms start time")
+
     # 3a. get source terms start time
     source_terms_start_times = get_intervals_start_time(timevector, selected_intervals_indexes)
+
+    if __debug__:
+        print("generate higher-res source terms")
 
     # 3b. create list of arrays of high-res source terms from low-res source terms
     hi_source_terms_list = generate_source_terms_list(len(source_terms_start_times),
@@ -419,24 +426,28 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
                                                       new_B_indexes,
                                                       )
 
+    if __debug__:
+        print("write source terms files")
+
     # 4. write geotiff files
-    write_source_terms(hi_source_terms_list, hi_metadata, source_terms_start_times)
+    write_source_terms(hi_source_terms_list, hi_metadata, source_terms_start_times, dest)
 
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print('missing parameter: <ord|abs <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
+    if len(sys.argv) != 6:
+        print('missing parameter: <ord|abs <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file> <destdir>')
         sys.exit(1)
 
-    (_, split, geojson, lo_geotiff, hi_geotiff) = sys.argv
+    (_, split, geojson, lo_geotiff, hi_geotiff, dest) = sys.argv
 
     if __debug__:
         print(f"{split = }")
         print(f"{geojson = }")
         print(f"{lo_geotiff = }")
         print(f"{hi_geotiff = }")
+        print(f"{dest = }")
 
-    generate_source_terms(_, split, geojson, lo_geotiff, hi_geotiff)
+    generate_source_terms(_, split, geojson, lo_geotiff, hi_geotiff, dest)
 
     sys.exit(0)

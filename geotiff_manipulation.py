@@ -52,23 +52,21 @@ def geotiff_to_array(geotiff):
             image_data[i,:,:] = band.ReadAsArray()
         return image_data
 
-def array_to_geotiff(array, geotiff_metadata, filename):
-    try:
+def array_to_geotiff(array, geotiff_metadata, filename, nb_bands=1):
+    if array.ndim == 3:
         nb_bands, height, width = array.shape
-    except Exception as e:
-        raise ValueError(f"array shape {array.shape} is not 3D")
+    elif array.ndim == 2:
+        height, width = array.shape
+        array = np.expand_dims(array, axis=0)
+    else:
+        print(f"ERROR: unsupported array dim.")
 
     driver = gdal.GetDriverByName('GTiff')
-    datatype=gdal.GDT_Float32
+    datatype=gdal.GDT_Float64
     with driver.Create(filename, width, height, nb_bands, datatype) as data:
         projection = get_metadata_projection(geotiff_metadata)
         transform = get_metadata_transform(geotiff_metadata)
         metadata = get_metadata_metadata(geotiff_metadata)
-
-        if __debug__:
-            print(f"{projection = }")
-            print(f"{transform = }")
-            print(f"{metadata = }")
 
         data.SetProjection(projection)
         data.SetGeoTransform(transform)
@@ -132,11 +130,6 @@ def get_coordinates_2154(geotiff):
         xs = xs.reshape((height, width))
         ys = ys.reshape((height, width))
 
-        if __debug__:
-            print(f"{xs.shape = }")
-            print(f"{xs.ndim = }")
-
-        # TOFIX: do stack properly
         coords = np.stack((xs, ys), axis=-1)
 
         return coords

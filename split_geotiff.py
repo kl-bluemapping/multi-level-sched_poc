@@ -268,4 +268,19 @@ if __name__ == "__main__":
     sys.exit(0)
 
 
+def stitch_geotiffs(inputs, output):
+    if __debug__:
+        print(f"{inputs = }")
+        print(f"{output = }")
+
+    gdal.UseExceptions()
+
+    vrt_path = os.path.basename(output) + ".vrt"
+    with gdal.BuildVRT(vrt_path, inputs) as vrt:
+        gdal.Translate(output, vrt)
+
+    # Supprimer le fichier VRT temporaire
+    os.remove(vrt_path)
+
+    return
 

@@ -9,6 +9,7 @@ from geotiff_manipulation import (
 from split_geotiff import (
         split_geotiff_ratio,
         get_line_coords,
+        stitch_geotiffs,
         )
 from scale_geotiff import (
         scale_geotiff,
@@ -73,6 +74,7 @@ def create_dir(path, name):
         res = dir_path
     except Exception as e:
         print(f"{e}: could not create directory {dir_path}")
+        res = dir_path
     return res
 
 def setup_simulations_dirs(root_sim_dir, nb_devices, subsims_path):
@@ -154,45 +156,56 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
         print(f"{poi_line = }")
 
     # gen. poi line
-    create_poi_geojson(
-            poi_line[0],
-            split_axis,
-            poi_line[1],
-            poi_line[2],
-            poi_line[3],
-            poi_line[4],
-            poi_geojson
-            )
+    if not os.path.isfile(poi_geojson):
+        create_poi_geojson(
+                poi_line[0],
+                split_axis,
+                poi_line[1],
+                poi_line[2],
+                poi_line[3],
+                poi_line[4],
+                poi_geojson
+                )
 
     create_downscaled_sim_ruleset(reference_ruleset, split_axis, downscaled_sim, poi_line)
 
     # collect downscaled results
     # TODO: subprocess run
 
-    sys.exit(0)
-
     # gen. src. terms
     # setup source terms dir
     # TODO: directly in subsims ?
-    src_terms_dir = create_dir(orig_sim_path, "src_terms")
+    src_terms_dir = create_dir(orig_sim_path, "springs_wells")
+    downscaled_res_geojson_path = downscaled_sim.output_path + "output=POI_water_depth_scaled_measure_POI_on_water_depth_with_timeserie/"
+    downscaled_res_geojson_file = os.listdir(downscaled_res_geojson_path)[0]
+    downscaled_res_geojson = downscaled_res_geojson_path + downscaled_res_geojson_file
 
     if __debug__:
         print(f"{src_terms_dir = }")
         print(f"{split_axis = }")
-        print(f"{poi_geojson = }")
+        print(f"{downscaled_res_geojson_path = }")
+        print(f"{downscaled_res_geojson_file = }")
+        print(f"{downscaled_res_geojson = }")
         print(f"{downscaled_ref_geotiff = }")
         print(f"{reference_geotiff = }")
 
-    sys.exit(0)
-
-    generate_source_terms(split_axis, poi_geojson, downscaled_ref_geotiff, reference_geotiff)
+    generate_source_terms(split_axis, downscaled_res_geojson, downscaled_ref_geotiff, reference_geotiff, src_terms_dir)
 
     # feed src. terms to sub-sims.
+
+    # setup split src_terms subsims dest dirs
+    # split src_terms
+    for root, dirs, files in os.walk(src_terms_dir):
+        for f in files:
+            path_f = os.path.join(root, f)
+            if is_geotiff(path_f):
+                src_terms_bounds = split_geotiff_ratio(split_axis, split_ratio, path_f, subsims_dir)
 
     # gen. sub-sims rulesets
     if __debug__:
         print(f"{subsims_bounds = }")
 
+    subsims_rulesets = []
     for i in range(subsims_count):
         subsim = sims_profiles[i+2] # account for ref & downscaled
         subsim_geotiff = subsim.input_path + "topography/" + "0.tif"
@@ -210,17 +223,62 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
         if __debug__:
             print(f"subsim {i} {profile = }")
 
-        create_subsim_ruleset(reference_ruleset, subsim, profile)
+        subsim_ruleset = subsim.input_path + "ruleset.json5"
+        if not os.path.isfile(subsim_ruleset):
+            create_subsim_ruleset(reference_ruleset, subsim, profile)
+        subsims_rulesets.append(subsim_ruleset)
 
-    # run sub-sims -- in parallel if gpus >= 2 ; else in seq.
-    subsim_0_ruleset = sim_profiles[2].input_path + "ruleset.json5"
-    subsim_1_ruleset = sim_profiles[2].input_path + "ruleset.json5"
-
-    # collect sub-sims results
+    if __debug__:
+        for ruleset in subsims_rulesets:
+            print(f"subsim ruleset: {ruleset}")
 
     # stitch sub-sims results to reference sim extent
+
+    # gdal merge list: list[list[geotiff_a, geotiff_b,...]]
+    stitch_targets = []
+    # iter over all part_0 res. that have a match
+    subsim_0_output = sims_profiles[2].output_path
+    for root, dirs, files in os.walk(subsim_0_output):
+        for d in dirs:
+            path_d = os.path.join(root, d)
+            if os.path.isdir(path_d):
+                #if __debug__:
+                #    print(f"{path_d = }")
+                #    print(f"{os.listdir(path_d) = }")
+                for f in os.listdir(path_d):
+                    if f.endswith('.tif'):
+                        part_0_f = os.path.join(root, d, f)
+                        if os.path.isfile(part_0_f):
+                            stitch_target = [part_0_f]
+                            if __debug__:
+                                print(f"found: {part_0_f}")
+                        for i in range    (1, subsims_count): # every subsim after part_0
+                            subsim_output_path = sims_profiles[2+i].output_path
+                            subsim_f = os.path.join(subsim_output_path, d, f)
+                            if os.path.isfile(subsim_f):
+                                stitch_target.append(subsim_f)
+                                stitch_targets.append(stitch_target)
+                                if __debug__:
+                                    print(f"found: {subsim_f}")
+
+    if __debug__:
+        print(f"{stitch_targets = }")
+        print(f"{len(stitch_targets) = }")
+
     # setup outputs merging dir
-    split_output_dir = create_dir(orig_sim_path, "split_output")
+    final_res_dir = reference_sim.output_path
+    if __debug__:
+        print(f"{final_res_dir = }")
+
+    for stitch_target in stitch_targets:
+        target_name = os.path.basename(stitch_target[0])
+        target_dir = os.path.basename(os.path.dirname(stitch_target[0]))
+        final_target_dir = create_dir(final_res_dir, target_dir)
+        final_target = final_target_dir + target_name
+        stitch_geotiffs(stitch_target, final_target)
+        if __debug__:
+            print(f"{stitch_target = }")
+            print(f"{final_target = }")
 
     return
 
