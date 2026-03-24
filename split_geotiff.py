@@ -27,6 +27,8 @@ def compute_orientation_border(orientation, ratio, min_A, min_B, max_A, max_B):
     results.append(end)
     results.append(0)
     results.append(0)
+    results.append(0)
+    results.append(0)
 
     return results
 
@@ -114,7 +116,6 @@ def gdal_split_geotiff(res_path, original_geotiff, min_X, min_Y, max_X, max_Y):
         print(f"{max_X = }")
         print(f"{max_Y = }")
 
-
     gdal.Translate(
             res_path,
             original_geotiff,
@@ -131,12 +132,12 @@ def get_line_coords(orientation, ratio, geotiff):
     # get geotiff transform
     transform = get_metadata_transform(metadata)
 
-    scale_X = transform[0]
-    extent_X_min = transform[2]
+    scale_X = transform[1]
+    extent_X_min = transform[0] + scale_X / 2
     extent_X_max = extent_X_min + (scale_X * width)
 
-    scale_Y = transform[4]
-    extent_Y_min = transform[5]
+    scale_Y = transform[5]
+    extent_Y_min = transform[3] + scale_Y / 2
     extent_Y_max = extent_Y_min + (scale_Y * height)
 
     border = compute_orientation_border(
@@ -155,11 +156,13 @@ def get_line_coords(orientation, ratio, geotiff):
         border[3] = scale_X
         border[4] = scale_Y
 
+    border[5] = height
+    border[6] = width
+
     if __debug__:
         print(f"{border = }")
 
     return border
-
 
 def split_geotiff_ratio(orientation, ratio, geotiff, destination):
     # get geotiff metadata
@@ -169,12 +172,12 @@ def split_geotiff_ratio(orientation, ratio, geotiff, destination):
     # get geotiff transform
     transform = get_metadata_transform(metadata)
 
-    scale_X = transform[0]
-    extent_X_min = transform[2]
+    scale_X = transform[1]
+    extent_X_min = transform[0]
     extent_X_max = extent_X_min + (scale_X * width)
 
-    scale_Y = transform[4]
-    extent_Y_min = transform[5]
+    scale_Y = transform[5]
+    extent_Y_min = transform[3]
     extent_Y_max = extent_Y_min + (scale_Y * height)
 
     if __debug__:
@@ -243,7 +246,9 @@ def split_geotiff_ratio(orientation, ratio, geotiff, destination):
             part_1_max_X,
             part_1_max_Y
             )
-    return
+
+    return [part_0_min_X, part_0_min_Y, part_0_max_X, part_0_max_Y,
+            part_1_min_X, part_1_min_Y, part_1_max_X, part_1_max_Y]
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:

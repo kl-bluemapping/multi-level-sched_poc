@@ -2,73 +2,162 @@
 functions to extract and format data from a poi geojson
 '''
 
-import rasterio
 import numpy as np
-
-def geotiff_to_array(geotiff):
-    with rasterio.open(geotiff) as data:
-        image_data = data.read()  # read all bands
-    return image_data
-
-def array_to_geotiff(array, geotiff_metadata, filename):
-    with rasterio.open(filename, 'w', **geotiff_metadata) as geotiff:
-        geotiff.write(array, 1)
+from osgeo import gdal, osr
 
 def get_geotiff_metadata(geotiff):
-    with rasterio.open(geotiff) as data:
-        metadata = data.meta
-    return metadata
+    geotiff_metadata = {}
+    gdal.UseExceptions()
+    with gdal.Open(geotiff, gdal.GA_ReadOnly) as data:
+        geotiff_metadata["projection"] = data.GetProjection()
+        geotiff_metadata["geotransform"] = data.GetGeoTransform()
+        geotiff_metadata["height"] = data.RasterYSize
+        geotiff_metadata["width"] = data.RasterXSize
+        geotiff_metadata["nb_bands"] = data.RasterCount
+        geotiff_metadata["metadata"] = data.GetMetadata()
+    return geotiff_metadata
+
+def get_metadata_projection(metadata):
+    projection = metadata.get("projection")
+    return projection
 
 def get_metadata_transform(metadata):
-    transform = metadata.get("transform")
+    transform = metadata.get("geotransform")
     return transform
 
 def get_metadata_shape(metadata):
     height = metadata.get("height")
     width = metadata.get("width")
-    return height ,width
+    return height, width
+
+def get_metadata_metadata(metadata):
+    metadata = metadata.get("metadata")
+    return metadata
+
+def geotiff_to_array(geotiff):
+    gdal.UseExceptions()
+    with gdal.Open(geotiff, gdal.GA_ReadOnly) as data:
+        height = data.RasterYSize
+        width = data.RasterXSize
+        nb_bands = data.RasterCount
+        if __debug__:
+            print(f"{height = }")
+            print(f"{width = }")
+            print(f"{nb_bands = }")
+        image_data = np.zeros((nb_bands, height, width), dtype=np.float32)
+        if __debug__:
+            print(f"{image_data.shape = }")
+        for i in range(nb_bands):
+            band = data.GetRasterBand(i+1)
+            image_data[i,:,:] = band.ReadAsArray()
+        return image_data
+
+def array_to_geotiff(array, geotiff_metadata, filename):
+    try:
+        nb_bands, height, width = array.shape
+    except Exception as e:
+        raise ValueError(f"array shape {array.shape} is not 3D")
+
+    driver = gdal.GetDriverByName('GTiff')
+    datatype=gdal.GDT_Float32
+    with driver.Create(filename, width, height, nb_bands, datatype) as data:
+        projection = get_metadata_projection(geotiff_metadata)
+        transform = get_metadata_transform(geotiff_metadata)
+        metadata = get_metadata_metadata(geotiff_metadata)
+
+        if __debug__:
+            print(f"{projection = }")
+            print(f"{transform = }")
+            print(f"{metadata = }")
+
+        data.SetProjection(projection)
+        data.SetGeoTransform(transform)
+        data.SetMetadata(metadata)
+
+        for i in range(nb_bands):
+            band = data.GetRasterBand(i+1)
+            band.WriteArray(array[i,:,:])
+            band.FlushCache()
+    return
+
+def transform_point(transform, x, y):
+    origin_x = transform[0]
+    pixel_width = transform[1]
+    rotation_x = transform[2]
+    origin_y = transform[3]
+    rotation_y = transform[4]
+    pixel_height = transform[5]
+
+    X = origin_x + y * pixel_width + x * rotation_x + (pixel_width / 2)
+    Y = origin_y + y * rotation_y + x * pixel_height + (pixel_height / 2)
+
+    return X, Y
+
+def transform_mesh(transform, rows, cols):
+    nb_elems = rows * cols
+
+    arr_x = np.zeros(nb_elems)
+    arr_y = np.zeros(nb_elems)
+
+    i = 0
+    for row in range(rows):
+        for col in range(cols):
+            x, y = transform_point(transform, row, col)
+            arr_x[i] = x
+            arr_y[i] = y
+            i += 1
+    return arr_x, arr_y
 
 def get_coordinates_2154(geotiff):
-    with rasterio.open(geotiff) as src:
-        # check for epsg:2154
-        crs = src.crs
-        if crs.to_epsg() != 2154:
-            raise ValueError(f"{crs} is not EPSG:2154")
+    gdal.UseExceptions()
+    with gdal.Open(geotiff, gdal.GA_ReadOnly) as data:
+        projection = data.GetProjection()
 
-        # ignore dim[0] - because it at 1 -> ask T. ?
-        band1 = src.read(1)
-        height = band1.shape[0]
-        width = band1.shape[1]
+        srs = osr.SpatialReference()
+        srs.ImportFromWkt(projection)
+        epsg = srs.GetAttrValue('AUTHORITY', 1)
 
-        transform = src.transform
+        if epsg != '2154':
+            raise ValueError(f"{epsg} is not EPSG:2154")
 
-        # create grid - directly to tensor ?
-        rows = np.arange(height)
-        cols = np.arange(width)
+        metadata = get_geotiff_metadata(geotiff)
 
-        mesh_cols, mesh_rows = np.meshgrid(cols, rows)
+        height, width = get_metadata_shape(metadata)
+        transform = get_metadata_transform(metadata)
 
         # conv (row, col) to spatial coord (x, y)
-        xs, ys = rasterio.transform.xy(transform, mesh_rows, mesh_cols)
+        xs, ys = transform_mesh(transform, height, width)
 
-        xs = np.array(xs)
-        ys = np.array(ys)
+        # reshape to 2D matrix after call to
+        xs = xs.reshape((height, width))
+        ys = ys.reshape((height, width))
 
-        # must reshape to 2D matrix after call to xy()
-        #   rasterio.transform.xy() takes 1D vectors as input
-        #   if given 2D matrices, it will flatten them
-        #   as such, they must be reshaped afterwards
-        xs = xs.reshape(mesh_rows.shape)
-        ys = ys.reshape(mesh_rows.shape)
+        if __debug__:
+            print(f"{xs.shape = }")
+            print(f"{xs.ndim = }")
 
+        # TOFIX: do stack properly
         coords = np.stack((xs, ys), axis=-1)
 
         return coords
 
+# WARNING: transform encoding depends of the used lib.
+#   rasterio: (x-width, x-height, x-base, y-width, y-height, y-base)
+#   gdal: (x-base, x-width, x-height, y-base, y-width, y-height)
+# gdal configuration
+def format_transform(transform, lib='gdal'):
+    res = []
+    if lib == 'rasterio':
+        res.append(transform[2])
+        res.append(transform[0])
+        res.append(transform[1])
+        res.append(transform[5])
+        res.append(transform[3])
+        res.append(transform[4])
+    elif lib == 'gdal':
+        res = transform
+    else:
+        print(f"ERROR: unsupported geotiff manipulation library")
+        sys.exit(1)
+    return res
 
-''' gdal equivalent:
-from osgeo import gdal
-
-data = gdal.Open(orig_topo_geotiff, gdal.GA_ReadOnly)
-geoTransform = data.GetGeoTransform()
-'''

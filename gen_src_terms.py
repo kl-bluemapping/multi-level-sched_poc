@@ -1,4 +1,4 @@
-''' main.py
+''' gen_src_terms.py
 sim. input up/down-scaling caller
 '''
 
@@ -117,15 +117,15 @@ def get_interval_average(data_lists, interval_length):
     return result_lists
 
 
-def indexes_cardinal_split(indexes, split='vertical'):
+def indexes_cardinal_split(indexes, split='abs'):
     '''
     splits indexes list into two lists N/S or W/E
     '''
     part_A = []
     part_B = []
-    if split == 'vertical':
+    if split == 'abs':
         axis = 0
-    elif split == 'horizontal':
+    elif split == 'ord':
         axis = 1
     else:
         raise ValueError(f"split '{split}' is not supported")
@@ -339,7 +339,7 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
 
     # 2a. divide poi by spatial section
     # A/B partition
-    A_poi, B_poi = indexes_cardinal_split(poi_indexes, 'vertical')
+    A_poi, B_poi = indexes_cardinal_split(poi_indexes, 'abs')
 
     # 2b. compute scaling ratio between hih and low res/
     # get high-res geotiff metadata
@@ -361,7 +361,7 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
         ratio = height_ratio
 
     # 2c. for ea. partition, create new hi-res indexes
-    if split == "horiz":
+    if split == "ord":
         # north
         A_B_mv = [1, 0] # north part to south part movement
         new_B_indexes = sursample_indexes(A_poi, A_B_mv, ratio)
@@ -378,7 +378,7 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
         new_A_indexes = remove_out_of_bound_indexes(new_A_indexes,
                                                         hi_shape[0],
                                                         hi_shape[1])
-    elif split == "vert":
+    elif split == "abs":
         # west
         A_B_mv = [0, 1] # west part to east part movement
         new_B_indexes = sursample_indexes(A_poi, A_B_mv, ratio)
@@ -426,7 +426,7 @@ def generate_source_terms(split, geojson, lo_geotiff, hi_geotiff):
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:
-        print('missing parameter: <horiz|vert> <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
+        print('missing parameter: <ord|abs <geojson_file> <lo-res_geotiff_file> <hi-res_geotiff_file>')
         sys.exit(1)
 
     (_, split, geojson, lo_geotiff, hi_geotiff) = sys.argv

@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import numpy as np
 
 from poi_geojson_stub import (
         gen_poi_features_header,
@@ -19,12 +20,11 @@ def create_poi_geojson(const, axis, start, end, stride, offset, dest):
         print(f"{offset = }")
         print(f"{dest = }")
 
-    import numpy as np
     with open(dest, 'a', encoding="utf-8") as file:
         file.write(gen_poi_features_header())
         file.write("\n")
 
-        line_offset = const - offset
+        line_offset = const - abs(offset)
 
         for i in np.arange(start, end, stride):
             if axis == 'abs':
@@ -38,7 +38,7 @@ def create_poi_geojson(const, axis, start, end, stride, offset, dest):
                 file.write("\n")
 
         file.write(",")
-        line_offset = const + offset
+        line_offset = const + abs(offset)
 
         for i in np.arange(start, end, stride):
             if axis == 'abs':
