@@ -1,6 +1,7 @@
 import sys
 import os
 import torch
+import subprocess
 
 from geotiff_manipulation import (
     get_geotiff_metadata,
@@ -48,7 +49,7 @@ def copy_subdirs_tree(root_dir, copy_dir):
             print(f"{e}")
 
 class SimProfile:
-    def __init__(self, gpu_id, root):
+    def __init__(self, gpu_id, root, command):
         self.gpu_id = gpu_id
         if not os.path.exists(root):
             os.mkdir(root)
@@ -62,6 +63,10 @@ class SimProfile:
             os.mkdir(out_path)
         self.output_path = out_path
         self.status = -1
+        sim_id = os.path.basename(os.path.dirname(root))
+        sim_id_arg = "--simulation-id=" + sim_id
+        self.command = command[:]
+        self.command[3] = sim_id_arg
 
     def copy_input_dirs(self, source):
         copy_subdirs_tree(source, self.input_path)
@@ -77,16 +82,16 @@ def create_dir(path, name):
         res = dir_path
     return res
 
-def setup_simulations_dirs(root_sim_dir, nb_devices, subsims_path):
+def setup_simulations_dirs(root_sim_dir, nb_devices, subsims_path, command):
     sims = []
 
     # log original sim.
-    original_sim = SimProfile(-1, root_sim_dir)
+    original_sim = SimProfile(-1, root_sim_dir, command)
     sims.append(original_sim)
 
     # log downscaled sim. & create dirs.
     downscaled_sim_path = root_sim_dir + "downscaled/"
-    downscaled_sim = SimProfile(0, downscaled_sim_path)
+    downscaled_sim = SimProfile(0, downscaled_sim_path, command)
     downscaled_sim.copy_input_dirs(original_sim.input_path)
     sims.append(downscaled_sim)
 
@@ -94,13 +99,43 @@ def setup_simulations_dirs(root_sim_dir, nb_devices, subsims_path):
     for i in range(nb_devices):
         sub_path = "part_" + str(i) + "/"
         subsim_path = os.path.join(subsims_path, sub_path)
-        sim = SimProfile(i, subsim_path)
+        sim = SimProfile(i, subsim_path, command)
         #sim.copy_input_dirs(original_sim.input_path)
         sims.append(sim)
 
     return sims
 
-def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
+
+def run_wrapped_sim(processing_path, sim):
+    processing_input_path = os.path.join(processing_path, "input")
+    processing_output_path = os.path.join(processing_path, "output")
+
+    if __debug__:
+        print(f"{processing_input_path = }")
+        print(f"{processing_output_path = }")
+
+    if __debug__:
+        print(f"sim. run command: {sim.command}")
+
+    os.rename(sim.input_path, processing_input_path)
+    os.rename(sim.output_path, processing_output_path)
+
+    # downscaled sim. run as subprocess
+    try:
+        result = subprocess.run(sim.command, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"subproc. returned 0")
+        else:
+            print(f"subproc err. {result.returncode}")
+    except OSError as e:
+        print("Execution failed:")
+
+    os.rename(processing_input_path, sim.input_path)
+    os.rename(processing_output_path, sim.output_path)
+
+    return
+
+def main(orig_sim_path, split_axis, split_ratio, scaling_ratio, command):
     # count gpus
     gpu_count = torch.cuda.device_count()
     if __debug__:
@@ -115,7 +150,7 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
     subsims_dir = create_dir(orig_sim_path, "subsims")
 
     # setup simulation profiles 
-    sims_profiles = setup_simulations_dirs(orig_sim_path, subsims_count, subsims_dir)
+    sims_profiles = setup_simulations_dirs(orig_sim_path, subsims_count, subsims_dir, command)
 
     reference_sim = sims_profiles[0]
     downscaled_sim = sims_profiles[1]
@@ -170,7 +205,39 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
     create_downscaled_sim_ruleset(reference_ruleset, split_axis, downscaled_sim, poi_line)
 
     # collect downscaled results
-    # TODO: subprocess run
+    # restore input dir to /opt/ml/processing
+    processing_path = os.path.dirname(os.path.dirname(reference_sim.root_path))
+    if __debug__:
+        print(f"{processing_path = }")
+
+    run_wrapped_sim(processing_path, downscaled_sim)
+
+    #processing_input_path = os.path.join(processing_path, "input")
+    #processing_output_path = os.path.join(processing_path, "output")
+
+    #if __debug__:
+    #    print(f"{processing_input_path = }")
+    #    print(f"{processing_output_path = }")
+
+    #if __debug__:
+    #    print(f"downscaled run {downscaled_sim.command}")
+
+    #os.rename(downscaled_sim.input_path, processing_input_path)
+    #os.rename(downscaled_sim.output_path, processing_output_path)
+
+    ## downscaled sim. run as subprocess
+    #try:
+    #    result = subprocess.run(command, capture_output=True, text=True)
+    #    if result.returncode == retcode:
+    #        print(f"subproc. returned {retcode}")
+    #    else:
+    #        print(f"subproc err. {result.returncode}")
+    #except OSError as e:
+    #    print("Execution failed:")
+
+    #os.rename(processing_input_path, downscaled_sim.input_path)
+    #os.rename(processing_output_path, downscaled_sim.output_path)
+
 
     # gen. src. terms
     # setup source terms dir
@@ -232,6 +299,11 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
         for ruleset in subsims_rulesets:
             print(f"subsim ruleset: {ruleset}")
 
+    # run subsims
+    for i in range(subsims_count):
+        subsim = sims_profiles[i+2] # account for ref & downscaled
+        run_wrapped_sim(processing_path, subsim)
+
     # stitch sub-sims results to reference sim extent
 
     # gdal merge list: list[list[geotiff_a, geotiff_b,...]]
@@ -270,12 +342,13 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
     if __debug__:
         print(f"{final_res_dir = }")
 
+    # merge split outputs back into original extent
     for stitch_target in stitch_targets:
         target_name = os.path.basename(stitch_target[0])
         target_dir = os.path.basename(os.path.dirname(stitch_target[0]))
         final_target_dir = create_dir(final_res_dir, target_dir)
         final_target = final_target_dir + target_name
-        stitch_geotiffs(stitch_target, final_target)
+    #    stitch_geotiffs(stitch_target, final_target)
         if __debug__:
             print(f"{stitch_target = }")
             print(f"{final_target = }")
@@ -283,13 +356,12 @@ def main(orig_sim_path, split_axis, split_ratio, scaling_ratio):
     return
 
 if __name__ == "__main__":
-    if len(sys.argv) < 6:
+    if len(sys.argv) < 5:
         print('''missing parameter:
             <abs|ord (string)>
             <split ratio (float)>
             <scaling (integer)>
             <simulation (path)>
-            <driver>
               ''')
         sys.exit(1)
 
@@ -297,7 +369,6 @@ if __name__ == "__main__":
     split_ratio = sys.argv[2]
     scaling_ratio = sys.argv[3]
     orig_sim_path = sys.argv[4]
-    driver = sys.argv[5]
     sim_args = sys.argv[5:]
 
     if __debug__:
@@ -305,18 +376,20 @@ if __name__ == "__main__":
         print(f"{split_ratio = }")
         print(f"{scaling_ratio = }")
         print(f"{orig_sim_path = }")
-        print(f"{driver = }")
         print(f"{sim_args = }")
 
     # run downscaled sim. in sub-process
     # retrieve args
     args = sim_args
 
-    # set entrypoint
+    # set sim. parameters
     entrypoint = "./src/main.py"
+    driver = "--driver=v2"
 
     # create run command
     command = args
+    command.insert(0, driver)
+    command.insert(0, "") # --simulation_id=...
     command.insert(0, entrypoint)
     command.insert(0, '-O')
     command.insert(0, "python3")
@@ -327,22 +400,22 @@ if __name__ == "__main__":
     if __debug__:
         print(f"run {command = }")
 
-    #sys.exit(0)
-
-    #try:
-    #    result = subprocess.run(command, capture_output=True, text=True)
-    #    if result.returncode == retcode:
-    #        print(f"subproc. returned {retcode}")
-    #    else:
-    #        print(f"subproc err. {result.returncode}")
-    #except OSError as e:
-    #    print("Execution failed:")
-
     # check if original sim. inputs exist -- debug mode ?
     orig_sim_inputs_path = orig_sim_path + "input"
     if not os.path.exists(orig_sim_inputs_path):
         print("error: no 'input' directory in simulation path")
         sys.exit(1)
+
+    orig_sim_outputs_path = orig_sim_path + "output"
+
+    # create original sim. to a subdir in /opt/ml/processing
+    wrapped_path = create_dir(orig_sim_path, "wrapper")
+    new_sim_input_path = os.path.join(wrapped_path, "input")
+    new_sim_output_path = os.path.join(wrapped_path, "output")
+
+    os.rename(orig_sim_inputs_path, new_sim_input_path)
+    if os.path.exists(orig_sim_outputs_path):
+        os.rename(orig_sim_outputs_path, new_sim_output_path)
 
     if __debug__:
         orig_input_dirs = next(os.walk(orig_sim_inputs_path), (None, [], None))[1]
@@ -352,7 +425,12 @@ if __name__ == "__main__":
         print(f"{orig_input_dirs = }")
         print(f"{orig_input_files = }")
 
-    main(orig_sim_path, split_axis, split_ratio, scaling_ratio)
+    #main(orig_sim_path, split_axis, split_ratio, scaling_ratio, command)
+    main(wrapped_path, split_axis, split_ratio, scaling_ratio, command)
+
+    # restore original sim path
+    os.rename(new_sim_input_path, orig_sim_inputs_path)
+    os.rename(new_sim_output_path, orig_sim_outputs_path)
 
     sys.exit(0)
 
